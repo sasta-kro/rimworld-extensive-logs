@@ -1,13 +1,41 @@
-import json
+from __future__ import annotations
 
-with open("your_output.json", "r") as f:
-    logs = json.load(f)
+import argparse
+from pathlib import Path
 
-for log in logs:
-    date = log["human_date"]
+from rimworld_pipeline.formatter import convert_json_file_to_text_file
 
-    if log["type"] == "tale" and log["pawn"]:
-        print(f"[{date}] EVENT: {log['pawn']} triggered {log['def']}.")
 
-    elif log["type"] == "playlog_interaction":
-        print(f"[{date}] SOCIAL: {log['initiator']} did {log['interactionDef']} with {log['recipient']}.")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Convert structured timeline JSON into compact narrative text lines."
+    )
+    parser.add_argument(
+        "--input",
+        default="your_output.json",
+        help="Input timeline JSON file.",
+    )
+    parser.add_argument(
+        "--output",
+        default="timeline_text.txt",
+        help="Output text timeline file.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    input_path = Path(args.input).expanduser().resolve()
+    output_path = Path(args.output).expanduser().resolve()
+
+    convert_json_file_to_text_file(
+        timeline_json_path=input_path,
+        timeline_text_output_path=output_path,
+    )
+
+    print(f"Wrote text timeline to {output_path}")
+
+
+if __name__ == "__main__":
+    main()

@@ -5,7 +5,7 @@ def prune_xml_tree(element, max_repeats=2):
     """
     Recursively strips out text content and truncates repeating XML tags.
     """
-    # 1. Clear out the actual data/text to save token space
+    # Clear out the actual data/text to save token space
     if element.text and element.text.strip():
         element.text = "..."
 
