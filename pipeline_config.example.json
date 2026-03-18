@@ -1,0 +1,8 @@
+{
+  "pipeline": {
+    "save_directory": "./_test_files",
+    "file_pattern": "*Dilunasol*",
+    "timeline_json_output_path": "./outputs/rimworld_timeline.json",
+    "timeline_text_output_path": "./outputs/rimworld_timeline.txt"
+  }
+}

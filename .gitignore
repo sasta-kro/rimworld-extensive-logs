@@ -3,3 +3,7 @@
 _test_files/
 _test_outputs
 .idea/
+outputs/
+
+repomix.config.json
+repomix-digest.md
