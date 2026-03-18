@@ -3,24 +3,26 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
+from rimworld_pipeline.sanitizer import sanitize_rimworld_markup
+
 
 def render_event_as_text(event_payload: dict[str, object]) -> str:
     human_date = str(event_payload.get("human_date", "Unknown date"))
     event_type = event_payload.get("type")
 
     if event_type == "tale":
-        pawn_name_or_id = event_payload.get("pawn") or "Unknown pawn"
-        tale_definition = event_payload.get("def") or "Unknown tale"
-        custom_label = event_payload.get("customLabel")
+        pawn_name_or_id = sanitize_rimworld_markup(str(event_payload.get("pawn") or "")) or "Unknown pawn"
+        tale_definition = sanitize_rimworld_markup(str(event_payload.get("def") or "")) or "Unknown tale"
+        custom_label = sanitize_rimworld_markup(str(event_payload.get("customLabel") or "")) or None
 
         if custom_label:
             return f"[{human_date}] EVENT: {pawn_name_or_id} triggered {tale_definition} ({custom_label})."
         return f"[{human_date}] EVENT: {pawn_name_or_id} triggered {tale_definition}."
 
     if event_type == "playlog_interaction":
-        initiator_name_or_id = event_payload.get("initiator") or "Unknown initiator"
-        recipient_name_or_id = event_payload.get("recipient") or "Unknown recipient"
-        interaction_definition = event_payload.get("interactionDef") or "Unknown interaction"
+        initiator_name_or_id = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
+        recipient_name_or_id = sanitize_rimworld_markup(str(event_payload.get("recipient") or "")) or "Unknown recipient"
+        interaction_definition = sanitize_rimworld_markup(str(event_payload.get("interactionDef") or "")) or "Unknown interaction"
         return (
             f"[{human_date}] SOCIAL: {initiator_name_or_id} did "
             f"{interaction_definition} with {recipient_name_or_id}."
@@ -31,8 +33,8 @@ def render_event_as_text(event_payload: dict[str, object]) -> str:
         return f"[{human_date}] SNAPSHOT: {snapshot_stats}."
 
     if event_type == "archive_message":
-        archive_label = event_payload.get("label")
-        archive_text = event_payload.get("text") or ""
+        archive_label = sanitize_rimworld_markup(str(event_payload.get("label") or "")) or None
+        archive_text = sanitize_rimworld_markup(str(event_payload.get("text") or "")) or ""
         if archive_label:
             return f"[{human_date}] NOTIFICATION: {archive_label} - {archive_text}"
         return f"[{human_date}] MESSAGE: {archive_text}"

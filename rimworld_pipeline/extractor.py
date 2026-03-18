@@ -8,6 +8,8 @@ import json
 import xml.etree.ElementTree as ET
 import zipfile
 
+from rimworld_pipeline.sanitizer import sanitize_rimworld_markup
+
 
 WORLD_SAVE_MEMBER_PATH = "world/000_save"
 
@@ -349,8 +351,12 @@ def extract_archive_messages(
                 "tick": resolved_tick,
                 "human_date": ticks_to_date(resolved_tick),
                 "class": archive_item_element.get("Class"),
-                "label": clean_text(archive_item_element.find("label")),
-                "text": clean_text(archive_item_element.find("text")),
+                "label": sanitize_rimworld_markup(
+                    clean_text(archive_item_element.find("label"))
+                ),
+                "text": sanitize_rimworld_markup(
+                    clean_text(archive_item_element.find("text"))
+                ),
             }
         )
 
