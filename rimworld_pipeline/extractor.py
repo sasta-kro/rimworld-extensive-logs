@@ -240,19 +240,23 @@ def extract_snapshot_event(world_root: ET.Element, ticks_game: int) -> dict[str,
 
 def extract_tale_events(
     world_root: ET.Element,
-    last_seen_tick: int,
+    game_start_abs_tick: int,
+    last_seen_tick_abs: int,
     pawn_id_to_name: dict[str, str],
 ) -> tuple[list[dict[str, object]], int]:
     """Extracts tale records newer than the dedup boundary."""
     tale_events: list[dict[str, object]] = []
-    highest_tale_tick = last_seen_tick
+    highest_tale_tick_abs = last_seen_tick_abs
 
     for tale_element in world_root.findall("./game/taleManager/tales/li"):
-        tale_tick = parse_int_value(tale_element.find("date"))
-        if tale_tick is None or tale_tick <= last_seen_tick:
+        tale_tick_abs = parse_int_value(tale_element.find("date"))
+        if tale_tick_abs is None or tale_tick_abs <= last_seen_tick_abs:
             continue
 
-        highest_tale_tick = max(highest_tale_tick, tale_tick)
+        highest_tale_tick_abs = max(highest_tale_tick_abs, tale_tick_abs)
+        tale_tick_game = tale_tick_abs - game_start_abs_tick
+        if tale_tick_game < 0:
+            tale_tick_game = tale_tick_abs
 
         raw_tale_id = clean_text(tale_element.find("id"))
         pawn_data_element = tale_element.find("pawnData")
@@ -277,8 +281,9 @@ def extract_tale_events(
             {
                 "type": "tale",
                 "source": "taleManager.tales",
-                "tick": tale_tick,
-                "human_date": ticks_to_date(tale_tick),
+                "tick": tale_tick_game,
+                "tickAbs": tale_tick_abs,
+                "human_date": ticks_to_date(tale_tick_game),
                 "class": tale_element.get("Class"),
                 "def": clean_text(tale_element.find("def")),
                 "customLabel": clean_text(tale_element.find("customLabel")),
@@ -287,24 +292,28 @@ def extract_tale_events(
             }
         )
 
-    return tale_events, highest_tale_tick
+    return tale_events, highest_tale_tick_abs
 
 
 def extract_playlog_interactions(
     world_root: ET.Element,
-    last_seen_tick: int,
+    game_start_abs_tick: int,
+    last_seen_tick_abs: int,
     pawn_id_to_name: dict[str, str],
 ) -> tuple[list[dict[str, object]], int]:
     """Extracts social interactions newer than the dedup boundary."""
     playlog_events: list[dict[str, object]] = []
-    highest_playlog_tick = last_seen_tick
+    highest_playlog_tick_abs = last_seen_tick_abs
 
     for playlog_element in world_root.findall("./game/playLog/entries/li"):
-        playlog_tick = parse_int_value(playlog_element.find("ticksAbs"))
-        if playlog_tick is None or playlog_tick <= last_seen_tick:
+        playlog_tick_abs = parse_int_value(playlog_element.find("ticksAbs"))
+        if playlog_tick_abs is None or playlog_tick_abs <= last_seen_tick_abs:
             continue
 
-        highest_playlog_tick = max(highest_playlog_tick, playlog_tick)
+        highest_playlog_tick_abs = max(highest_playlog_tick_abs, playlog_tick_abs)
+        playlog_tick_game = playlog_tick_abs - game_start_abs_tick
+        if playlog_tick_game < 0:
+            playlog_tick_game = playlog_tick_abs
 
         initiator_id = clean_text(playlog_element.find("initiator"))
         recipient_id = clean_text(playlog_element.find("recipient"))
@@ -313,8 +322,9 @@ def extract_playlog_interactions(
             {
                 "type": "playlog_interaction",
                 "source": "playLog.entries",
-                "tick": playlog_tick,
-                "human_date": ticks_to_date(playlog_tick),
+                "tick": playlog_tick_game,
+                "tickAbs": playlog_tick_abs,
+                "human_date": ticks_to_date(playlog_tick_game),
                 "class": playlog_element.get("Class"),
                 "interactionDef": clean_text(playlog_element.find("intDef")),
                 "logID": clean_text(playlog_element.find("logID")),
@@ -325,7 +335,7 @@ def extract_playlog_interactions(
             }
         )
 
-    return playlog_events, highest_playlog_tick
+    return playlog_events, highest_playlog_tick_abs
 
 
 def extract_archive_messages(
@@ -377,6 +387,7 @@ def extract_archive_messages(
 def extract_events_for_world_save(
     world_root: ET.Element,
     ticks_game: int,
+    game_start_abs_tick: int,
     last_seen_tale_tick: int,
     last_seen_playlog_tick: int,
     last_seen_archive_tick: int,
@@ -393,14 +404,16 @@ def extract_events_for_world_save(
 
     tale_events, highest_tale_tick = extract_tale_events(
         world_root=world_root,
-        last_seen_tick=last_seen_tale_tick,
+        game_start_abs_tick=game_start_abs_tick,
+        last_seen_tick_abs=last_seen_tale_tick,
         pawn_id_to_name=pawn_id_to_name,
     )
     extracted_events.extend(tale_events)
 
     playlog_events, highest_playlog_tick = extract_playlog_interactions(
         world_root=world_root,
-        last_seen_tick=last_seen_playlog_tick,
+        game_start_abs_tick=game_start_abs_tick,
+        last_seen_tick_abs=last_seen_playlog_tick,
         pawn_id_to_name=pawn_id_to_name,
     )
     extracted_events.extend(playlog_events)
@@ -437,7 +450,8 @@ def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[
     for save_source in chronological_sources:
         world_root = parse_world_root(save_source)
         ticks_game = parse_int_value(world_root.find("./game/tickManager/ticksGame"))
-        if ticks_game is None:
+        game_start_abs_tick = parse_int_value(world_root.find("./game/tickManager/gameStartAbsTick"))
+        if ticks_game is None or game_start_abs_tick is None:
             continue
 
         historical_message_signatures = set(seen_message_signatures)
@@ -456,6 +470,7 @@ def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[
         ) = extract_events_for_world_save(
             world_root=world_root,
             ticks_game=ticks_game,
+            game_start_abs_tick=game_start_abs_tick,
             last_seen_tale_tick=last_seen_tale_tick,
             last_seen_playlog_tick=last_seen_playlog_tick,
             last_seen_archive_tick=last_seen_archive_tick,
