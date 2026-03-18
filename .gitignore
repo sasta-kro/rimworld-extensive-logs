@@ -5,5 +5,4 @@ _test_outputs
 .idea/
 outputs/
 
-repomix.config.json
-repomix-digest.md
+**/*repomix*

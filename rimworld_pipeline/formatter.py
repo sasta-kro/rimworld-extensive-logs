@@ -30,6 +30,13 @@ def render_event_as_text(event_payload: dict[str, object]) -> str:
         snapshot_stats = event_payload.get("stats")
         return f"[{human_date}] SNAPSHOT: {snapshot_stats}."
 
+    if event_type == "archive_message":
+        archive_label = event_payload.get("label")
+        archive_text = event_payload.get("text") or ""
+        if archive_label:
+            return f"[{human_date}] NOTIFICATION: {archive_label} - {archive_text}"
+        return f"[{human_date}] MESSAGE: {archive_text}"
+
     # Keeping unknown records in output is preserving potentially important context.
     return f"[{human_date}] RAW: {event_payload}"
 

@@ -326,6 +326,37 @@ def extract_playlog_interactions(
     return playlog_events, highest_playlog_tick
 
 
+def extract_archive_messages(
+    world_root: ET.Element,
+    ticks_game: int,
+    last_seen_tick: int,
+) -> tuple[list[dict[str, object]], int]:
+    """Extracts archived letters/messages and applies the same global dedup gate."""
+    archive_events: list[dict[str, object]] = []
+    highest_archive_tick = last_seen_tick
+
+    for archive_item_element in world_root.findall("./game/history/archive/archivables/li"):
+        arrival_tick = parse_int_value(archive_item_element.find("arrivalTick"))
+        resolved_tick = arrival_tick if arrival_tick is not None else ticks_game
+        if resolved_tick <= last_seen_tick:
+            continue
+
+        highest_archive_tick = max(highest_archive_tick, resolved_tick)
+        archive_events.append(
+            {
+                "type": "archive_message",
+                "source": "history.archive.archivables",
+                "tick": resolved_tick,
+                "human_date": ticks_to_date(resolved_tick),
+                "class": archive_item_element.get("Class"),
+                "label": clean_text(archive_item_element.find("label")),
+                "text": clean_text(archive_item_element.find("text")),
+            }
+        )
+
+    return archive_events, highest_archive_tick
+
+
 def extract_events_for_world_save(
     world_root: ET.Element,
     ticks_game: int,
@@ -353,7 +384,19 @@ def extract_events_for_world_save(
     )
     extracted_events.extend(playlog_events)
 
-    updated_last_seen_tick = max(last_seen_tick, highest_tale_tick, highest_playlog_tick)
+    archive_events, highest_archive_tick = extract_archive_messages(
+        world_root=world_root,
+        ticks_game=ticks_game,
+        last_seen_tick=last_seen_tick,
+    )
+    extracted_events.extend(archive_events)
+
+    updated_last_seen_tick = max(
+        last_seen_tick,
+        highest_tale_tick,
+        highest_playlog_tick,
+        highest_archive_tick,
+    )
     return extracted_events, updated_last_seen_tick
 
 
