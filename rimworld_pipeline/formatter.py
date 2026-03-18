@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import re
 
 from rimworld_pipeline.sanitizer import sanitize_rimworld_markup
 
@@ -46,8 +47,17 @@ def format_hour_for_event(event_payload: dict[str, object]) -> str:
     # Keeping hour precision only is reducing repeated date tokens while preserving chronology cues.
     raw_tick = event_payload.get("tick", 0)
     tick_value = int(raw_tick) if isinstance(raw_tick, int | str) and str(raw_tick).isdigit() else 0
-    hour_value = (tick_value % 60000) // 2500
-    return f"{hour_value:02d}:00"
+    hour_24_value = (tick_value % 60000) // 2500
+    meridiem = "AM" if hour_24_value < 12 else "PM"
+    hour_12_value = hour_24_value % 12
+    if hour_12_value == 0:
+        hour_12_value = 12
+    return f"{hour_12_value}{meridiem}"
+
+
+def compact_text_log_line(raw_line: str) -> str:
+    # Collapsing blank paragraph gaps is reducing token waste in long notification bodies.
+    return re.sub(r"\n{2,}", "\n", raw_line)
 
 
 def append_aggregated_line(
@@ -81,7 +91,7 @@ def convert_timeline_to_text_lines(timeline_events: list[dict[str, object]]) -> 
 
         event_hour = format_hour_for_event(event_payload)
         event_body = render_event_as_text(event_payload)
-        formatted_event_line = f"[{event_hour}] {event_body}"
+        formatted_event_line = compact_text_log_line(f"[{event_hour}] {event_body}")
 
         # Aggregating consecutive duplicates is shrinking noisy repeated notifications.
         if formatted_event_line == previous_event_line:
