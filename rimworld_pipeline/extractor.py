@@ -331,17 +331,32 @@ def extract_playlog_interactions(
 def extract_archive_messages(
     world_root: ET.Element,
     ticks_game: int,
-    last_seen_tick: int,
+    last_seen_archive_tick: int,
+    historical_message_signatures: set[str],
+    seen_message_signatures: set[str],
 ) -> tuple[list[dict[str, object]], int]:
     """Extracts archived letters/messages and applies the same global dedup gate."""
     archive_events: list[dict[str, object]] = []
-    highest_archive_tick = last_seen_tick
+    highest_archive_tick = last_seen_archive_tick
 
     for archive_item_element in world_root.findall("./game/history/archive/archivables/li"):
+        archive_class = archive_item_element.get("Class") or ""
+        archive_label = sanitize_rimworld_markup(clean_text(archive_item_element.find("label")))
+        archive_text = sanitize_rimworld_markup(clean_text(archive_item_element.find("text")))
         arrival_tick = parse_int_value(archive_item_element.find("arrivalTick"))
-        resolved_tick = arrival_tick if arrival_tick is not None else ticks_game
-        if resolved_tick <= last_seen_tick:
-            continue
+
+        if arrival_tick is None:
+            # Deduplicating no-timestamp message rows by content is preventing repeated UI spam
+            # while still allowing chronological placement in the output timeline.
+            message_signature = f"{archive_class}_{archive_label or ''}_{archive_text or ''}"
+            if message_signature in historical_message_signatures:
+                continue
+            seen_message_signatures.add(message_signature)
+            resolved_tick = ticks_game
+        else:
+            resolved_tick = arrival_tick
+            if resolved_tick <= last_seen_archive_tick:
+                continue
 
         highest_archive_tick = max(highest_archive_tick, resolved_tick)
         archive_events.append(
@@ -350,13 +365,9 @@ def extract_archive_messages(
                 "source": "history.archive.archivables",
                 "tick": resolved_tick,
                 "human_date": ticks_to_date(resolved_tick),
-                "class": archive_item_element.get("Class"),
-                "label": sanitize_rimworld_markup(
-                    clean_text(archive_item_element.find("label"))
-                ),
-                "text": sanitize_rimworld_markup(
-                    clean_text(archive_item_element.find("text"))
-                ),
+                "class": archive_class,
+                "label": archive_label,
+                "text": archive_text,
             }
         )
 
@@ -366,9 +377,13 @@ def extract_archive_messages(
 def extract_events_for_world_save(
     world_root: ET.Element,
     ticks_game: int,
-    last_seen_tick: int,
+    last_seen_tale_tick: int,
+    last_seen_playlog_tick: int,
+    last_seen_archive_tick: int,
+    historical_message_signatures: set[str],
+    seen_message_signatures: set[str],
     pawn_id_to_name: dict[str, str],
-) -> tuple[list[dict[str, object]], int]:
+) -> tuple[list[dict[str, object]], int, int, int]:
     """Builds one save's event slice and advances the global dedup boundary."""
     extracted_events: list[dict[str, object]] = []
 
@@ -378,14 +393,14 @@ def extract_events_for_world_save(
 
     tale_events, highest_tale_tick = extract_tale_events(
         world_root=world_root,
-        last_seen_tick=last_seen_tick,
+        last_seen_tick=last_seen_tale_tick,
         pawn_id_to_name=pawn_id_to_name,
     )
     extracted_events.extend(tale_events)
 
     playlog_events, highest_playlog_tick = extract_playlog_interactions(
         world_root=world_root,
-        last_seen_tick=last_seen_tick,
+        last_seen_tick=last_seen_playlog_tick,
         pawn_id_to_name=pawn_id_to_name,
     )
     extracted_events.extend(playlog_events)
@@ -393,17 +408,13 @@ def extract_events_for_world_save(
     archive_events, highest_archive_tick = extract_archive_messages(
         world_root=world_root,
         ticks_game=ticks_game,
-        last_seen_tick=last_seen_tick,
+        last_seen_archive_tick=last_seen_archive_tick,
+        historical_message_signatures=historical_message_signatures,
+        seen_message_signatures=seen_message_signatures,
     )
     extracted_events.extend(archive_events)
 
-    updated_last_seen_tick = max(
-        last_seen_tick,
-        highest_tale_tick,
-        highest_playlog_tick,
-        highest_archive_tick,
-    )
-    return extracted_events, updated_last_seen_tick
+    return extracted_events, highest_tale_tick, highest_playlog_tick, highest_archive_tick
 
 
 def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[str, object]]:
@@ -418,7 +429,10 @@ def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[
 
     master_timeline: list[dict[str, object]] = []
     pawn_id_to_name: dict[str, str] = {}
-    last_seen_tick = 0
+    last_seen_tale_tick = 0
+    last_seen_playlog_tick = 0
+    last_seen_archive_tick = 0
+    seen_message_signatures: set[str] = set()
 
     for save_source in chronological_sources:
         world_root = parse_world_root(save_source)
@@ -426,16 +440,27 @@ def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[
         if ticks_game is None:
             continue
 
+        historical_message_signatures = set(seen_message_signatures)
+
         update_pawn_dictionary_from_world(world_root, pawn_id_to_name)
 
         # Merging map pawns is improving name resolution for world-level references.
         for map_root in parse_map_roots(save_source):
             update_pawn_dictionary_from_map(map_root, pawn_id_to_name)
 
-        new_events, last_seen_tick = extract_events_for_world_save(
+        (
+            new_events,
+            last_seen_tale_tick,
+            last_seen_playlog_tick,
+            last_seen_archive_tick,
+        ) = extract_events_for_world_save(
             world_root=world_root,
             ticks_game=ticks_game,
-            last_seen_tick=last_seen_tick,
+            last_seen_tale_tick=last_seen_tale_tick,
+            last_seen_playlog_tick=last_seen_playlog_tick,
+            last_seen_archive_tick=last_seen_archive_tick,
+            historical_message_signatures=historical_message_signatures,
+            seen_message_signatures=seen_message_signatures,
             pawn_id_to_name=pawn_id_to_name,
         )
 
