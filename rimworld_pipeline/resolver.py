@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import re
 import xml.etree.ElementTree as ET
 
+from rimworld_pipeline.extractors.common import build_name_from_name_triple, clean_text
 from rimworld_pipeline.snapshots import SaveSnapshot
 
 
@@ -73,29 +74,6 @@ def label_from_raw_id(raw_id: str | None) -> str | None:
         return thing_body.replace("_", " ")
 
     return normalized_id.replace("_", " ")
-
-
-def clean_text(xml_element: ET.Element | None) -> str | None:
-    if xml_element is None or xml_element.text is None:
-        return None
-
-    normalized_text = xml_element.text.strip()
-    return normalized_text if normalized_text else None
-
-
-def build_name_from_name_triple(name_element: ET.Element | None) -> str | None:
-    if name_element is None:
-        return None
-
-    nick_name = clean_text(name_element.find("nick"))
-    first_name = clean_text(name_element.find("first"))
-    last_name = clean_text(name_element.find("last"))
-
-    if nick_name:
-        return nick_name
-    if first_name and last_name:
-        return f"{first_name} {last_name}"
-    return first_name or last_name
 
 
 def clean_optional_text(raw_text: str | None) -> str | None:
@@ -194,7 +172,7 @@ class EntityResolver:
         normalized_id = normalize_entity_id(raw_id)
         if normalized_id is None:
             return ResolvedEntityRef(
-                raw_id=raw_id,
+                raw_id=None,
                 entity_id=None,
                 display_label=None,
                 kind_def=None,

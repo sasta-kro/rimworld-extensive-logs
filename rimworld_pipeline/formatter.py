@@ -4,73 +4,10 @@ from pathlib import Path
 import json
 import re
 
-from rimworld_pipeline.sanitizer import sanitize_rimworld_markup
-
-
-def render_event_as_text(event_payload: dict[str, object]) -> str:
-    event_type = event_payload.get("type")
-
-    if event_type == "tale":
-        pawn_name_or_id = sanitize_rimworld_markup(str(event_payload.get("pawn") or "")) or "Unknown pawn"
-        tale_definition = sanitize_rimworld_markup(str(event_payload.get("def") or "")) or "Unknown tale"
-        custom_label = sanitize_rimworld_markup(str(event_payload.get("customLabel") or "")) or None
-
-        if custom_label:
-            return f"EVENT: {pawn_name_or_id} triggered {tale_definition} ({custom_label})."
-        return f"EVENT: {pawn_name_or_id} triggered {tale_definition}."
-
-    if event_type == "playlog_interaction":
-        initiator_name_or_id = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
-        recipient_name_or_id = sanitize_rimworld_markup(str(event_payload.get("recipient") or "")) or "Unknown recipient"
-        interaction_definition = sanitize_rimworld_markup(str(event_payload.get("interactionDef") or "")) or "Unknown interaction"
-        return (
-            f"SOCIAL: {initiator_name_or_id} did "
-            f"{interaction_definition} with {recipient_name_or_id}."
-        )
-
-    if event_type == "snapshot":
-        snapshot_stats = event_payload.get("stats")
-        return f"SNAPSHOT: {snapshot_stats}."
-
-    if event_type == "archive_message":
-        archive_label = sanitize_rimworld_markup(str(event_payload.get("label") or "")) or None
-        archive_text = sanitize_rimworld_markup(str(event_payload.get("text") or "")) or ""
-        if archive_label:
-            return f"NOTIFICATION: {archive_label} - {archive_text}"
-        return f"MESSAGE: {archive_text}"
-
-    if event_type == "battle_state_transition":
-        subject = sanitize_rimworld_markup(str(event_payload.get("subject") or "")) or "Unknown subject"
-        transition_def = sanitize_rimworld_markup(str(event_payload.get("transitionDef") or "")) or "Unknown transition"
-        initiator = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
-        return f"BATTLE: {subject} had {transition_def} caused by {initiator}."
-
-    if event_type == "battle_melee":
-        initiator = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
-        recipient = sanitize_rimworld_markup(str(event_payload.get("recipient") or "")) or "Unknown recipient"
-        tool_label = sanitize_rimworld_markup(str(event_payload.get("toolLabel") or "")) or None
-        if tool_label:
-            return f"BATTLE: {initiator} hit {recipient} in melee with {tool_label}."
-        return f"BATTLE: {initiator} hit {recipient} in melee."
-
-    if event_type == "battle_ranged_impact":
-        initiator = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
-        recipient = sanitize_rimworld_markup(str(event_payload.get("recipient") or "")) or "Unknown recipient"
-        weapon_def = sanitize_rimworld_markup(str(event_payload.get("weaponDef") or "")) or "Unknown weapon"
-        return f"BATTLE: {initiator} hit {recipient} with {weapon_def}."
-
-    if event_type == "battle_event":
-        subject = sanitize_rimworld_markup(str(event_payload.get("subject") or "")) or "Unknown subject"
-        event_def = sanitize_rimworld_markup(str(event_payload.get("eventDef") or "")) or "Unknown battle event"
-        initiator = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
-        return f"BATTLE: {subject} had {event_def} from {initiator}."
-
-    # Keeping unknown records in output is preserving potentially important context.
-    return f"RAW: {event_payload}"
+from rimworld_pipeline.rendering.event_text import render_event_as_text
 
 
 def format_hour_for_event(event_payload: dict[str, object]) -> str:
-    # Keeping hour precision only is reducing repeated date tokens while preserving chronology cues.
     raw_tick = event_payload.get("tick", 0)
     tick_value = int(raw_tick) if isinstance(raw_tick, int | str) and str(raw_tick).isdigit() else 0
     hour_24_value = (tick_value % 60000) // 2500
@@ -82,7 +19,6 @@ def format_hour_for_event(event_payload: dict[str, object]) -> str:
 
 
 def compact_text_log_line(raw_line: str) -> str:
-    # Collapsing blank paragraph gaps is reducing token waste in long notification bodies.
     return re.sub(r"\n{2,}", "\n", raw_line)
 
 
@@ -104,6 +40,10 @@ def convert_timeline_to_text_lines(timeline_events: list[dict[str, object]]) -> 
     previous_event_count = 0
 
     for event_payload in timeline_events:
+        event_body = render_event_as_text(event_payload)
+        if event_body is None:
+            continue
+
         human_date = str(event_payload.get("human_date", "Unknown date"))
         if human_date != current_human_date:
             append_aggregated_line(output_lines, previous_event_line, previous_event_count)
@@ -116,10 +56,8 @@ def convert_timeline_to_text_lines(timeline_events: list[dict[str, object]]) -> 
             current_human_date = human_date
 
         event_hour = format_hour_for_event(event_payload)
-        event_body = render_event_as_text(event_payload)
         formatted_event_line = compact_text_log_line(f"[{event_hour}] {event_body}")
 
-        # Aggregating consecutive duplicates is shrinking noisy repeated notifications.
         if formatted_event_line == previous_event_line:
             previous_event_count += 1
             continue
