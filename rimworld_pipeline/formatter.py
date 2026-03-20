@@ -39,6 +39,32 @@ def render_event_as_text(event_payload: dict[str, object]) -> str:
             return f"NOTIFICATION: {archive_label} - {archive_text}"
         return f"MESSAGE: {archive_text}"
 
+    if event_type == "battle_state_transition":
+        subject = sanitize_rimworld_markup(str(event_payload.get("subject") or "")) or "Unknown subject"
+        transition_def = sanitize_rimworld_markup(str(event_payload.get("transitionDef") or "")) or "Unknown transition"
+        initiator = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
+        return f"BATTLE: {subject} had {transition_def} caused by {initiator}."
+
+    if event_type == "battle_melee":
+        initiator = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
+        recipient = sanitize_rimworld_markup(str(event_payload.get("recipient") or "")) or "Unknown recipient"
+        tool_label = sanitize_rimworld_markup(str(event_payload.get("toolLabel") or "")) or None
+        if tool_label:
+            return f"BATTLE: {initiator} hit {recipient} in melee with {tool_label}."
+        return f"BATTLE: {initiator} hit {recipient} in melee."
+
+    if event_type == "battle_ranged_impact":
+        initiator = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
+        recipient = sanitize_rimworld_markup(str(event_payload.get("recipient") or "")) or "Unknown recipient"
+        weapon_def = sanitize_rimworld_markup(str(event_payload.get("weaponDef") or "")) or "Unknown weapon"
+        return f"BATTLE: {initiator} hit {recipient} with {weapon_def}."
+
+    if event_type == "battle_event":
+        subject = sanitize_rimworld_markup(str(event_payload.get("subject") or "")) or "Unknown subject"
+        event_def = sanitize_rimworld_markup(str(event_payload.get("eventDef") or "")) or "Unknown battle event"
+        initiator = sanitize_rimworld_markup(str(event_payload.get("initiator") or "")) or "Unknown initiator"
+        return f"BATTLE: {subject} had {event_def} from {initiator}."
+
     # Keeping unknown records in output is preserving potentially important context.
     return f"RAW: {event_payload}"
 
