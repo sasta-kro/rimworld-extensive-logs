@@ -7,6 +7,7 @@ import json
 import xml.etree.ElementTree as ET
 import zipfile
 
+from rimworld_pipeline.diffing.pipeline import build_inferred_events
 from rimworld_pipeline.extractors.archive import extract_archive_messages
 from rimworld_pipeline.extractors.battle import extract_battle_log_events
 from rimworld_pipeline.extractors.common import clean_text, parse_int_value
@@ -221,6 +222,8 @@ def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[
     last_seen_archive_tick = 0
     seen_message_signatures: set[str] = set()
     seen_battle_signatures: set[str] = set()
+    previous_snapshot: SaveSnapshot | None = None
+    previous_resolver: EntityResolver | None = None
 
     for save_source in chronological_sources:
         save_snapshot = load_save_snapshot(save_source)
@@ -248,10 +251,23 @@ def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[
             seen_battle_signatures=seen_battle_signatures,
         )
 
+        if previous_snapshot is not None and previous_resolver is not None:
+            new_events.extend(
+                build_inferred_events(
+                    previous_snapshot=previous_snapshot,
+                    current_snapshot=save_snapshot,
+                    previous_resolver=previous_resolver,
+                    current_resolver=resolver,
+                    ticks_to_date=ticks_to_date,
+                )
+            )
+
         for event_payload in new_events:
             event_payload["source_file"] = str(save_snapshot.source_path)
 
         master_timeline.extend(new_events)
+        previous_snapshot = save_snapshot
+        previous_resolver = resolver
 
     master_timeline.sort(key=lambda event_payload: int(event_payload.get("tick", 0)))
     return master_timeline

@@ -9,6 +9,7 @@ from rimworld_pipeline.snapshots import SaveSnapshot
 
 
 THING_ID_PATTERN = re.compile(r"^(?P<thing_type>[A-Za-z_]+)(?P<numeric_id>\d+)$")
+MAP_LOCAL_PAWN_PATH = "./things/thing/innerContainer/innerList/li"
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,19 @@ class EntityResolver:
                 role_hint=entity_info.role_hint,
             )
 
+        faction_info = self._factions_by_id.get(normalized_id)
+        if faction_info is not None:
+            return ResolvedEntityRef(
+                raw_id=raw_id,
+                entity_id=normalized_id,
+                display_label=faction_info.faction_name or normalized_id,
+                kind_def=None,
+                thing_def=None,
+                faction_id=normalized_id,
+                faction_name=faction_info.faction_name,
+                role_hint=None,
+            )
+
         return ResolvedEntityRef(
             raw_id=raw_id,
             entity_id=normalized_id,
@@ -243,13 +257,30 @@ class EntityResolver:
         ]
 
         for map_snapshot in save_snapshot.map_snapshots:
+            seen_entity_ids: set[str] = set()
             for map_pawn_path in map_pawn_paths:
                 for pawn_element in map_snapshot.root.findall(map_pawn_path):
+                    normalized_id = normalize_entity_id(clean_text(pawn_element.find("id")))
+                    if normalized_id is None or normalized_id in seen_entity_ids:
+                        continue
+                    seen_entity_ids.add(normalized_id)
                     self._add_entity_from_pawn_element(
                         pawn_element=pawn_element,
                         origin_scope=f"map:{map_snapshot.map_id}",
                         is_dead=False,
                     )
+            for pawn_element in map_snapshot.root.findall(MAP_LOCAL_PAWN_PATH):
+                if pawn_element.find("healthTracker") is None or pawn_element.find("id") is None:
+                    continue
+                normalized_id = normalize_entity_id(clean_text(pawn_element.find("id")))
+                if normalized_id is None or normalized_id in seen_entity_ids:
+                    continue
+                seen_entity_ids.add(normalized_id)
+                self._add_entity_from_pawn_element(
+                    pawn_element=pawn_element,
+                    origin_scope=f"map:{map_snapshot.map_id}",
+                    is_dead=False,
+                )
 
     def _load_tale_pawn_data(self, world_root: ET.Element) -> None:
         for candidate_element in world_root.iter():

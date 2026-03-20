@@ -1,8 +1,7 @@
 .venv/
 .prompt/
-_test_files/
-_test_outputs
-.idea/
+_tests/
 outputs/
+.idea/
 
 **/*repomix*

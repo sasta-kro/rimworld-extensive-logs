@@ -72,5 +72,6 @@ Currently, the project exists as a standalone Python pipeline. The long-term goa
 - [x] Implement time normalization and timeline sorting.
 - [x] Implement identity resolution for standard pawns.
 - [ ] Resolve temporary and non-standard pawn IDs.
+- [ ] Add single player support.
 - [ ] Port extraction logic into a C# RimWorld mod.
 - [ ] Implement automated background text exporting.
