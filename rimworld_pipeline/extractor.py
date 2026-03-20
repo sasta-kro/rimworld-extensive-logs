@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 import fnmatch
@@ -9,15 +8,12 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from rimworld_pipeline.sanitizer import sanitize_rimworld_markup
-
-
-WORLD_SAVE_MEMBER_PATH = "world/000_save"
-
-
-@dataclass(frozen=True)
-class SaveSource:
-    source_type: str
-    path: Path
+from rimworld_pipeline.snapshots import (
+    SaveSnapshot,
+    SaveSource,
+    WORLD_SAVE_MEMBER_PATH,
+    load_map_snapshots,
+)
 
 
 def clean_text(xml_element: ET.Element | None) -> str | None:
@@ -144,36 +140,30 @@ def get_chronological_sources(save_sources: list[SaveSource]) -> list[SaveSource
     return [save_source for save_source, _ in save_source_and_tick_pairs]
 
 
-def parse_world_root(save_source: SaveSource) -> ET.Element:
+def load_save_snapshot(save_source: SaveSource) -> SaveSnapshot | None:
     if save_source.source_type == "zip":
         with zipfile.ZipFile(save_source.path, "r") as archive_file:
             with archive_file.open(WORLD_SAVE_MEMBER_PATH, "r") as world_xml_stream:
-                return ET.parse(world_xml_stream).getroot()
+                world_root = ET.parse(world_xml_stream).getroot()
 
-    return ET.parse(save_source.path).getroot()
+            map_snapshots = load_map_snapshots(archive_file)
+    else:
+        world_root = ET.parse(save_source.path).getroot()
+        map_snapshots = []
 
+    ticks_game = parse_int_value(world_root.find("./game/tickManager/ticksGame"))
+    game_start_abs_tick = parse_int_value(world_root.find("./game/tickManager/gameStartAbsTick"))
+    if ticks_game is None or game_start_abs_tick is None:
+        return None
 
-def map_save_member_paths(archive_file: zipfile.ZipFile) -> list[str]:
-    return [
-        archive_member_name
-        for archive_member_name in archive_file.namelist()
-        if archive_member_name.startswith("maps/")
-        and archive_member_name.endswith("_save")
-        and archive_member_name != "maps/000_save"
-    ]
-
-
-def parse_map_roots(save_source: SaveSource) -> list[ET.Element]:
-    if save_source.source_type != "zip":
-        return []
-
-    map_roots: list[ET.Element] = []
-    with zipfile.ZipFile(save_source.path, "r") as archive_file:
-        for map_member_path in map_save_member_paths(archive_file):
-            with archive_file.open(map_member_path, "r") as map_xml_stream:
-                map_roots.append(ET.parse(map_xml_stream).getroot())
-
-    return map_roots
+    return SaveSnapshot(
+        source_path=save_source.path,
+        source_type=save_source.source_type,
+        world_root=world_root,
+        map_snapshots=map_snapshots,
+        ticks_game=ticks_game,
+        game_start_abs_tick=game_start_abs_tick,
+    )
 
 
 def update_pawn_dictionary_from_world(
@@ -200,9 +190,7 @@ def update_pawn_dictionary_from_world(
             pawn_id_to_name[pawn_id] = pawn_name
 
 
-def update_pawn_dictionary_from_map(
-    map_root: ET.Element, pawn_id_to_name: dict[str, str]
-) -> None:
+def update_pawn_dictionary_from_map(map_root: ET.Element, pawn_id_to_name: dict[str, str]) -> None:
     map_pawn_paths = [
         "./mapPawns/AllPawnsSpawned/li",
         "./mapPawns/AllPawnsUnspawned/li",
@@ -384,10 +372,8 @@ def extract_archive_messages(
     return archive_events, highest_archive_tick
 
 
-def extract_events_for_world_save(
-    world_root: ET.Element,
-    ticks_game: int,
-    game_start_abs_tick: int,
+def extract_events_for_snapshot(
+    save_snapshot: SaveSnapshot,
     last_seen_tale_tick: int,
     last_seen_playlog_tick: int,
     last_seen_archive_tick: int,
@@ -397,14 +383,15 @@ def extract_events_for_world_save(
 ) -> tuple[list[dict[str, object]], int, int, int]:
     """Builds one save's event slice and advances the global dedup boundary."""
     extracted_events: list[dict[str, object]] = []
+    world_root = save_snapshot.world_root
 
-    snapshot_event = extract_snapshot_event(world_root, ticks_game)
+    snapshot_event = extract_snapshot_event(world_root, save_snapshot.ticks_game)
     if snapshot_event is not None:
         extracted_events.append(snapshot_event)
 
     tale_events, highest_tale_tick = extract_tale_events(
         world_root=world_root,
-        game_start_abs_tick=game_start_abs_tick,
+        game_start_abs_tick=save_snapshot.game_start_abs_tick,
         last_seen_tick_abs=last_seen_tale_tick,
         pawn_id_to_name=pawn_id_to_name,
     )
@@ -412,7 +399,7 @@ def extract_events_for_world_save(
 
     playlog_events, highest_playlog_tick = extract_playlog_interactions(
         world_root=world_root,
-        game_start_abs_tick=game_start_abs_tick,
+        game_start_abs_tick=save_snapshot.game_start_abs_tick,
         last_seen_tick_abs=last_seen_playlog_tick,
         pawn_id_to_name=pawn_id_to_name,
     )
@@ -420,7 +407,7 @@ def extract_events_for_world_save(
 
     archive_events, highest_archive_tick = extract_archive_messages(
         world_root=world_root,
-        ticks_game=ticks_game,
+        ticks_game=save_snapshot.ticks_game,
         last_seen_archive_tick=last_seen_archive_tick,
         historical_message_signatures=historical_message_signatures,
         seen_message_signatures=seen_message_signatures,
@@ -448,29 +435,25 @@ def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[
     seen_message_signatures: set[str] = set()
 
     for save_source in chronological_sources:
-        world_root = parse_world_root(save_source)
-        ticks_game = parse_int_value(world_root.find("./game/tickManager/ticksGame"))
-        game_start_abs_tick = parse_int_value(world_root.find("./game/tickManager/gameStartAbsTick"))
-        if ticks_game is None or game_start_abs_tick is None:
+        save_snapshot = load_save_snapshot(save_source)
+        if save_snapshot is None:
             continue
 
         historical_message_signatures = set(seen_message_signatures)
 
-        update_pawn_dictionary_from_world(world_root, pawn_id_to_name)
+        update_pawn_dictionary_from_world(save_snapshot.world_root, pawn_id_to_name)
 
         # Merging map pawns is improving name resolution for world-level references.
-        for map_root in parse_map_roots(save_source):
-            update_pawn_dictionary_from_map(map_root, pawn_id_to_name)
+        for map_snapshot in save_snapshot.map_snapshots:
+            update_pawn_dictionary_from_map(map_snapshot.root, pawn_id_to_name)
 
         (
             new_events,
             last_seen_tale_tick,
             last_seen_playlog_tick,
             last_seen_archive_tick,
-        ) = extract_events_for_world_save(
-            world_root=world_root,
-            ticks_game=ticks_game,
-            game_start_abs_tick=game_start_abs_tick,
+        ) = extract_events_for_snapshot(
+            save_snapshot=save_snapshot,
             last_seen_tale_tick=last_seen_tale_tick,
             last_seen_playlog_tick=last_seen_playlog_tick,
             last_seen_archive_tick=last_seen_archive_tick,
@@ -480,7 +463,7 @@ def build_master_timeline(save_directory: Path, file_pattern: str) -> list[dict[
         )
 
         for event_payload in new_events:
-            event_payload["source_file"] = str(save_source.path)
+            event_payload["source_file"] = str(save_snapshot.source_path)
 
         master_timeline.extend(new_events)
 
